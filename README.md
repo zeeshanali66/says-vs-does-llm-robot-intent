@@ -45,6 +45,33 @@ Full tables: [`results/RESULTS.md`](results/RESULTS.md). Problems we hit and how
 
 Limitations: a 2D top-down room with one obstacle, one temperature-0 sample per prompt, five small local models, and an automatic left/right parser for the sentence (it marks sentences without a side as undefined).
 
+
+## Version 2: whose left do models actually use? (630 outputs)
+Version 1 could not separate "the person's left" from "the map's left", because the person stood at the bottom of the
+map. Version 2 also puts the person at the **top** of the room (their left = the map's right) and adds hint conditions.
+- Models describe sides in **fixed map coordinates** (smaller x = "left"), not from the robot's or the person's view.
+  With the person at the top and asked for the person's view, all five models were faithful only **0-17%** of the time.
+- Spelling out which side is "left" helped only the newest models (Gemma 4 person-frame 0.06 -> 0.44, Qwen 3.5 0 -> 0.44)
+  and did not help, or hurt, the older ones.
+
+## Version 3: can we make it follow the instruction? (324 outputs, 3 strongest models)
+Hardest setting (person at the top), three fixes, compared with version 2 (faithfulness in the requested frame):
+
+| Fix | Gemma 4 (person / robot) | Qwen 3.5 | Gemma 3 |
+|---|---|---|---|
+| none (v2) | 0.06 / 0.50 | 0.00 / 0.44 | 0.11 / 0.39 |
+| hint (v2) | 0.44 / 0.83 | 0.22 / 0.50 | 0.06 / 0.28 |
+| reason first | 0.94 / 0.61 | 0.06 / 0.44 | 0.22 / 0.50 |
+| **rotate the scene into the speaker's view** | **1.00 / 1.00** | **0.89 / 0.94** | 0.50 / 0.67 |
+| **check and repair** (told only "this is wrong") | 0.94 / 0.72 | **1.00 / 1.00** | **0.78 / 0.78** |
+
+- **Rotating the coordinates so the speaker faces "up"** works best: the model's map habit then gives the right
+  answer. Models cannot reliably do the mental rotation themselves (when asked to reason first, they often stated the
+  wrong side as "left").
+- **Check and repair** fixed 66 of 80 wrong answers (82%) with one round of feedback that did not reveal the answer.
+- Practical lesson: **don't ask the LLM to rotate; rotate for it**, and verify the sentence against the plan before it
+  is spoken.
+
 ## Run
 ```
 python -I svd_pipeline.py selftest   # geometry unit tests

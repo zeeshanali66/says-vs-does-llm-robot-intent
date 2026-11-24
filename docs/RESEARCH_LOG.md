@@ -33,3 +33,14 @@ But the person stands at the bottom of the map looking "up" (+y), so the person'
 
 ## 7. A naming bug in the results table
 The "sentence names a side at all" table printed its column as `c`. Renamed to `names_side`.
+
+## 8. Version 2 removed our own confound
+Adding a person at the top of the room separated the three frames. Result: models use map directions. A hint that
+spells out which side is "left" helps only the newest models.
+
+## 9. Version 3: fixes, and a launch false alarm
+Three fixes were tested on the hardest setting. Rotating the scene into the speaker's view and check-and-repair both
+reached 0.9-1.0 for the stronger models; reason-first was unreliable because models often state the wrong side.
+Problem we hit: twice the run looked "stuck" at launch (no output, no model loaded). It was the first request loading
+the model and producing a long answer, not a hang; restarting it was unnecessary. Lesson: check the server and the
+open connection before assuming a freeze.
