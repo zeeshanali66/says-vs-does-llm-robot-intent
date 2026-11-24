@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Says vs. Does viewer</title>
+<style>
+  :root { --bg:#f6f6f3; --fg:#1b1b1b; --panel:#ffffffee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16181c; --fg:#e8e8e8; --panel:#22252bee; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px system-ui, sans-serif; overflow:hidden; }
+  #ui { position:absolute; top:12px; left:12px; background:var(--panel); padding:10px 12px; border-radius:8px; max-width:340px; }
+  #ui select { margin:2px 0 6px; width:100%; }
+  .key span { display:inline-block; width:10px; height:10px; margin:0 4px 0 8px; }
+  #caption { margin-top:8px; font-size:13px; line-height:1.4; }
+  #intent { font-style:italic; }
+</style></head>
+<body>
+<div id="ui">
+  <b>Says vs. Does</b>: does the robot's stated intent match its plan?<br>
+  <label>Model <select id="model"></select></label>
+  <label>Output <select id="item"></select></label>
+  <div class="key"><span style="background:#2e9d4f"></span>plan <span style="background:#00a3c4"></span>AR arrow
+    <span style="background:#c0392b"></span>wall</div>
+  <div id="caption"></div>
+</div>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<script src="viewer_data.js"></script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { VRButton } from "three/addons/webxr/VRButton.js";
+
+const DATA = window.SVD_DATA || [], SCENES = window.SVD_SCENES || [];
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight); renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement); document.body.appendChild(VRButton.createButton(renderer));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(getComputedStyle(document.body).backgroundColor);
+const cam = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 100);
+// view from the person's position (5, -1), slightly raised, like the person's own eyes
+const P = (x, y, h = 0) => new THREE.Vector3(x - 5, h, -(y - 5));   // plan (x, y) -> three.js, room centred
+cam.position.copy(P(5, -3, 6));
+const controls = new OrbitControls(cam, renderer.domElement); controls.target.copy(P(5, 5)); controls.update();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+scene.add(new THREE.GridHelper(10, 10, 0x888888, 0xcccccc));
+const group = new THREE.Group(); scene.add(group);
+const mat = c => new THREE.MeshStandardMaterial({ color: c });
+
+function line(pts, color, h) {
+  const g = new THREE.BufferGeometry().setFromPoints(pts.map(([x, y]) => P(x, y, h)));
+  return new THREE.Line(g, new THREE.LineBasicMaterial({ color, linewidth: 3 }));
+}
+const key = d => `${d.direction} | lane ${d.lane} | ${d.stype} | ${d.frame} | ${d.order}`;
+const models = [...new Set(DATA.map(d => d.model))];
+const mSel = document.getElementById("model"), iSel = document.getElementById("item");
+models.forEach(m => mSel.add(new Option(m, m)));
+function fillItems() {
+  iSel.innerHTML = "";
+  DATA.filter(d => d.model === mSel.value).forEach((d, i) => iSel.add(new Option(key(d), DATA.indexOf(d))));
+  draw();
+}
+function draw() {
+  group.clear();
+  const d = DATA[+iSel.value]; if (!d) return;
+  const sc = SCENES.find(s => s.direction === d.direction && s.lane === d.lane && s.stype === d.stype);
+  const person = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 1.7), mat(0x777777));
+  person.position.copy(P(5, -1, 0.85)); group.add(person);
+  const ob = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.75, 32), mat(0x8fb3d9));
+  ob.position.copy(P(...sc.obst, 0.375)); group.add(ob);
+  sc.walls.forEach(([a, b]) => {
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const w = new THREE.Mesh(new THREE.BoxGeometry(len, 0.4, 0.15), mat(0xc0392b));
+    w.position.copy(P((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 0.2)); group.add(w);
+  });
+  const robot = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.5), mat(0xf1c40f));
+  robot.position.copy(P(...sc.start, 0.2)); group.add(robot);
+  const goal = new THREE.Mesh(new THREE.SphereGeometry(0.3), mat(0x2e9d4f));
+  goal.position.copy(P(...sc.goal, 0.3)); group.add(goal);
+  const p = d.parsed || {};
+  if ((p.plan || []).length > 1) group.add(line(p.plan, 0x2e9d4f, 0.05));
+  if ((p.arrow || []).length > 1) {
+    const a = p.arrow, n = a.length, from = P(...a[n - 2], 0.6), to = P(...a[n - 1], 0.6);
+    group.add(line(a, 0x00a3c4, 0.6));
+    group.add(new THREE.ArrowHelper(to.clone().sub(from).normalize(), to, 0.6, 0x00a3c4, 0.35, 0.25));
+  }
+  document.getElementById("caption").innerHTML =
+    `<div id="intent">"${(p.intent || "").replace(/</g, "&lt;")}"</div>` +
+    `plan: <b>${d.validity}</b> · sentence frame: <b>${d.sentence_frame ?? "-"}</b> · arrow matches plan: <b>${d.arrow_matches_plan ?? "-"}</b>`;
+}
+mSel.onchange = fillItems; iSel.onchange = draw; fillItems();
+renderer.setAnimationLoop(() => renderer.render(scene, cam));
+addEventListener("resize", () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+</script>
+</body></html>
